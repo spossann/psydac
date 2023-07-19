@@ -73,10 +73,10 @@ def test_regular_jacobians(geometry, npts_per_cell):
 
     # Direct API
     if ldim == 2:
-        jacobian_matrix_direct = np.array([[mapping.jac_mat(e1, e2) for e2 in regular_grid[1]] for e1 in regular_grid[0]])
+        jacobian_matrix_direct = np.array([[mapping.jacobian(e1, e2) for e2 in regular_grid[1]] for e1 in regular_grid[0]])
 
     if ldim == 3:
-        jacobian_matrix_direct = np.array([[[mapping.jac_mat(e1, e2, e3)
+        jacobian_matrix_direct = np.array([[[mapping.jacobian(e1, e2, e3)
                                                 for e3 in regular_grid[2]]
                                             for e2 in regular_grid[1]]
                                             for e1 in regular_grid[0]])
@@ -211,10 +211,10 @@ def test_irregular_jacobians(geometry, npts):
 
     # Direct API
     if ldim == 2:
-        jacobian_matrix_direct = np.array([[mapping.jac_mat(e1, e2) for e2 in irregular_grid[1]] for e1 in irregular_grid[0]])
+        jacobian_matrix_direct = np.array([[mapping.jacobian(e1, e2) for e2 in irregular_grid[1]] for e1 in irregular_grid[0]])
 
     if ldim == 3:
-        jacobian_matrix_direct = np.array([[[mapping.jac_mat(e1, e2, e3)
+        jacobian_matrix_direct = np.array([[[mapping.jacobian(e1, e2, e3)
                                                 for e3 in irregular_grid[2]]
                                             for e2 in irregular_grid[1]]
                                             for e1 in irregular_grid[0]])
@@ -617,9 +617,9 @@ def test_pushforwards_l2(ldim, jac_det, field_to_push):
 @pytest.mark.parametrize('ldim', (2, 3))
 def test_pushforwards_hdiv(ldim):
     jacobians = np.full((5,) * ldim + (ldim, ldim), np.eye(ldim))
-    metric_dets = np.full((5,) * ldim, 1)
+    metric_dets = np.full((5,) * ldim, 1.0)
     field_to_push = np.random.rand(ldim, *((5, ) * ldim), 1)
-    expected = np.moveaxis(field_to_push,-1, 0)
+    expected = np.moveaxis(field_to_push, -1, 0)
     out = np.zeros(expected.shape)
     if ldim == 2:
         pushforward_2d_hdiv(field_to_push, jacobians, metric_dets, out)

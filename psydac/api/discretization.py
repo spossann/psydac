@@ -1,7 +1,7 @@
 # coding: utf-8
 
 # TODO: - init_fem is called whenever we call discretize. we should check that
-#         nderiv has not been changed. shall we add quad_order too?
+#         nderiv has not been changed. shall we add nquads too?
 import os
 from sympy import Expr as sym_Expr
 import numpy as np
@@ -36,17 +36,56 @@ from psydac.api.utilities    import flatten
 from psydac.fem.splines      import SplineSpace
 from psydac.fem.tensor       import TensorFemSpace
 from psydac.fem.partitioning import create_cart, construct_connectivity, construct_interface_spaces, construct_reduced_interface_spaces
-from psydac.fem.vector       import ProductFemSpace
+from psydac.fem.vector       import ProductFemSpace, VectorFemSpace
 from psydac.cad.geometry     import Geometry
 from psydac.mapping.discrete import NurbsMapping
 
-__all__ = ('discretize',)
+from psydac.linalg.stencil     import StencilVectorSpace
+from psydac.linalg.block       import BlockVectorSpace
 
-#==============================================================================           
+__all__ = ('discretize', 'discretize_derham', 'reduce_space_degrees', 'discretize_space', 'discretize_domain')
+
+
+#==============================================================================
+def change_dtype(V, dtype):
+    """
+    This function take a FemSpace V and create a new vector_space for it with the data type required.
+
+    Parameters
+    ----------
+
+    Vh : FemSpace
+        The FEM space.
+
+    dtype   : Data Type
+        float or complex
+    """
+    if not V.vector_space.dtype == dtype:
+        if isinstance(V.vector_space, BlockVectorSpace):
+            # Recreate the BlockVectorSpace
+            new_spaces=[]
+            for v in V.spaces:
+                change_dtype(v, dtype)
+                new_spaces.append(v.vector_space)
+            V._vector_space = BlockVectorSpace(*new_spaces, connectivity=V.vector_space.connectivity)
+
+        # If the vector_space is a StencilVectorSpace
+        else:
+            # Recreate the StencilVectorSpace
+            interfaces = V.vector_space.interfaces
+            V._vector_space = StencilVectorSpace(V.vector_space.cart, dtype=dtype)
+
+            # Recreate the interface in the StencilVectorSpace
+            for (axis, ext), interface_space in interfaces.items():
+                V.vector_space.set_interface(axis, ext, interface_space.cart)
+
+    return V
+
+#==============================================================================
 def discretize_derham(derham, domain_h, *args, **kwargs):
 
-    ldim     = derham.shape
-    mapping  = derham.spaces[0].domain.mapping
+    ldim    = derham.shape
+    mapping = domain_h.domain.mapping # NOTE: assuming single-patch domain!
 
     bases  = ['B'] + ldim * ['M']
     spaces = [discretize_space(V, domain_h, basis=basis, **kwargs) \
@@ -119,9 +158,9 @@ def reduce_space_degrees(V, Vh, *, basis='B', sequence='DR'):
           'N' : for Nedelec elements, as described in [2],
           'RT': for Raviart-Thomas elements, as described in [2].
 
-    Results
+    Returns
     -------
-    Wh : TensorFemSpace, ProductFemSpace
+    Wh : TensorFemSpace, VectorFemSpace
       The reduced space
 
     """
@@ -139,7 +178,7 @@ def reduce_space_degrees(V, Vh, *, basis='B', sequence='DR'):
                 raise NotImplementedError('TODO')
         else:
             raise NotImplementedError('The sequence {} is not currently available for the space kind {}'.format(sequence, V.kind))
-        Wh = ProductFemSpace(*spaces)
+        Wh = VectorFemSpace(*spaces)
 
     elif isinstance(V.kind, HdivSpaceType):
         if sequence == 'DR':
@@ -154,7 +193,7 @@ def reduce_space_degrees(V, Vh, *, basis='B', sequence='DR'):
                 raise NotImplementedError('TODO')
         else:
             raise NotImplementedError('The sequence {} is not currently available for the space kind {}'.format(sequence, V.kind))
-        Wh = ProductFemSpace(*spaces)
+        Wh = VectorFemSpace(*spaces)
 
     elif isinstance(V.kind, L2SpaceType):
         if sequence == 'DR':
@@ -183,14 +222,14 @@ def reduce_space_degrees(V, Vh, *, basis='B', sequence='DR'):
 
     if isinstance(V, VectorFunctionSpace):
         if isinstance(V.kind, (H1SpaceType, L2SpaceType, UndefinedSpaceType)):
-            Wh = ProductFemSpace(*[Wh]*V.ldim)
+            Wh = VectorFemSpace(*[Wh]*V.ldim)
 
     return Wh
 
 
 #==============================================================================
 # TODO knots
-def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None, quad_order=None, basis='B', sequence='DR'):
+def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None, nquads=None, basis='B', sequence='DR'):
     """
     This function creates the discretized space starting from the symbolic space.
 
@@ -212,11 +251,11 @@ def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None,
     knots: list | dict
         The knots sequence of the h1 space in each direction.
 
-    quad_order: list
+    nquads: list
         The number of quadrature points in each direction.
 
     basis: str
-        The type of basis function can be 'b' for b-splines or 'M' for M-splines.
+        The type of basis function can be 'B' for B-splines or 'M' for M-splines.
 
     sequence: str
         The sequence used to reduce the space. The available choices are:
@@ -260,6 +299,13 @@ def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None,
     if sequence in ['TH', 'N', 'RT']:
         assert isinstance(V, ProductSpace) and len(V.spaces) == 2
 
+    # Define data type of our TensorFemSpace
+    dtype = float
+    # TODO remove when codomain_type is implemented in SymPDE
+    if hasattr(V, 'codomain_type'):
+        if V.codomain_type == 'complex':
+            dtype = complex
+
     g_spaces   = {}
     domain     = domain_h.domain
 
@@ -276,7 +322,8 @@ def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None,
         else:
             mappings  = [domain_h.mappings[inter.logical_domain.name] for inter in interiors]
 
-        spaces    = [m.space for m in mappings]
+        # Get all the FEM spaces from the mapping and convert their vector_space at the dtype needed
+        spaces    = [change_dtype(m.space, dtype) for m in mappings]
         g_spaces  = dict(zip(interiors, spaces))
         spaces    = [S.spaces for S in spaces]
 
@@ -328,8 +375,18 @@ def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None,
                  # Create 1D finite element spaces and precompute quadrature data
                 spaces[i] = [SplineSpace( p, knots=T , periodic=P) for p,T, P in zip(degree_i, knots[interior.name], periodic)]
 
+
         carts    = create_cart(ddms, spaces)
-        g_spaces = {inter:TensorFemSpace( ddms[i], *spaces[i], cart=carts[i], quad_order=quad_order) for i,inter in enumerate(interiors)}
+        g_spaces = {inter:TensorFemSpace( ddms[i], *spaces[i], cart=carts[i], nquads=nquads, dtype=dtype) for i,inter in enumerate(interiors)}
+
+
+        for i,j in connectivity:
+            ((axis_i, ext_i), (axis_j , ext_j)) = connectivity[i, j]
+            minus = interiors[i]
+            plus  = interiors[j]
+            max_ncells = [max(ni,nj) for ni,nj in zip(domain_h.ncells[minus.name],domain_h.ncells[plus.name])]
+            g_spaces[minus].add_refined_space(ncells=max_ncells)
+            g_spaces[plus].add_refined_space(ncells=max_ncells)
 
         # ... construct interface spaces
         construct_interface_spaces(domain_h.ddm, g_spaces, carts, interiors, connectivity)
@@ -339,13 +396,16 @@ def discretize_space(V, domain_h, *, degree=None, multiplicity=None, knots=None,
         Vh = g_spaces[inter]
         if isinstance(V, ProductSpace):
             spaces = [reduce_space_degrees(Vi, Vh, basis=basis, sequence=sequence) for Vi in V.spaces]
-            spaces = [Vh.spaces if isinstance(Vh, ProductFemSpace) else Vh for Vh in spaces]
+            spaces = [Vh.spaces if isinstance(Vh, VectorFemSpace) else Vh for Vh in spaces]
             spaces = flatten(spaces)
-            Vh     = ProductFemSpace(*spaces)
+            Vh     = VectorFemSpace(*spaces)
         else:
             Vh = reduce_space_degrees(V, Vh, basis=basis, sequence=sequence)
 
         Vh.symbolic_space = V
+        for key in Vh._refined_space:
+            Vh.get_refined_space(key).symbolic_space = V
+
         new_g_spaces[inter]   = Vh
 
     construct_reduced_interface_spaces(g_spaces, new_g_spaces, interiors, connectivity)
@@ -398,6 +458,10 @@ def discretize(a, *args, **kwargs):
 
         if len(kernel_expr) > 1:
             return DiscreteSumForm(a, kernel_expr, *args, **kwargs)
+
+    # TODO uncomment when the SesquilinearForm subclass of bilinearForm is create in SymPDE
+    # if isinstance(a, sym_SesquilinearForm):
+    #     return DiscreteSesquilinearForm(a, kernel_expr, *args, **kwargs)
 
     if isinstance(a, sym_BilinearForm):
         return DiscreteBilinearForm(a, kernel_expr, *args, **kwargs)

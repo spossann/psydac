@@ -9,12 +9,12 @@ from mpi4py    import MPI
 from psydac.ddm.partition import compute_dims, partition_procs_per_patch
 
 
-__all__ = ['find_mpi_type',
+__all__ = ('find_mpi_type',
            'MultiPatchDomainDecomposition',
            'DomainDecomposition',
            'CartDecomposition',
            'InterfaceCartDecomposition',
-           'create_interfaces_cart']
+           'create_interfaces_cart')
 
 #===============================================================================
 def find_mpi_type( dtype ):
@@ -118,7 +118,7 @@ class MultiPatchDomainDecomposition:
 
     @property
     def ncells( self ):
-        return self._npts
+        return self._ncells
 
     @property
     def periods( self ):
@@ -371,6 +371,47 @@ class DomainDecomposition:
     def coords_exist( self, coords ):
         return all( P or (0 <= c < d) for P,c,d in zip( self._periods, coords, self._nprocs ) )
 
+    def refine(self, ncells, global_element_starts, global_element_ends):
+        """ Create the new Cartesian decomposition of the refined domain.
+
+        Parameters
+        ----------
+        ncells : list or tuple of int
+            Number of cells of refined space.
+
+        global_starts: list of list of int
+            The starts of the coefficients for every process along each direction.
+
+        global_ends: list of list of int
+            The ends of the coefficients for every process along each direction.
+
+        Returns
+        -------
+        domain : CartDecomposition
+            Cartesian decomposition of the refined domain.
+        """
+
+        # Check input arguments
+        assert len( ncells ) == len( self.ncells )
+        assert all(nc>=snc for nc, snc in zip(ncells, self.ncells))
+
+        domain         = DomainDecomposition(self.ncells, self.periods, comm=self.comm,
+                                            global_comm=self.global_comm, num_threads=self.num_threads,
+                                            size=self.size)
+        domain._ncells = tuple ( ncells )
+
+        # Store arrays with all the starts and ends along each direction for every process
+        domain._global_element_starts = tuple(global_element_starts)
+        domain._global_element_ends   = tuple(global_element_ends)
+        if self.is_comm_null:return domain
+
+        # Start/end values of global indices (without ghost regions)
+        domain._starts = tuple( domain._global_element_starts[axis][c] for axis,c in zip(range(self._ndims), self._coords) )
+        domain._ends   = tuple( domain._global_element_ends  [axis][c] for axis,c in zip(range(self._ndims), self._coords) )
+
+        domain._local_ncells = tuple(e-s+1 for s,e in zip(self._starts, self._ends))
+        return domain
+
 #==================================================================================
 class CartDecomposition():
     """
@@ -580,6 +621,7 @@ class CartDecomposition():
     def shape( self ):
         return self._shape
 
+    # TODO check if the property ranks_in_topo is still defined
     @property
     def ranks_in_topo( self ):
         return self._ranks_in_topo
@@ -679,17 +721,16 @@ class CartDecomposition():
  
         """
         # Make a copy
-        cart = CartDecomposition(self.npts, self.pads, self.periods, self.reorder, comm=self.comm)
+        # cart = CartDecomposition(self.npts, self.pads, self.periods, self.reorder, comm=self.comm)
+        cart = CartDecomposition(self.domain_decomposition, tuple(end[-1] + 1 for end in global_ends), global_starts, global_ends, self.pads, self.shifts)
+        # cart._npts = tuple(end[-1] + 1 for end in global_ends)
 
-        cart._npts = tuple(end[-1] + 1 for end in global_ends)
-
-        cart._dims = self._dims
+        cart._ndims = self._ndims
 
         # Create a 2D MPI cart
         cart._comm_cart = self._comm_cart
 
         # Know my coordinates in the topology
-        cart._rank_in_topo = self._rank_in_topo
         cart._coords       = self._coords
 
         # Start/end values of global indices (without ghost regions)
@@ -743,6 +784,7 @@ class CartDecomposition():
         -------
         v: CartDecomposition
             The reduced cart.
+        
         """
 
         cart = CartDecomposition(self.domain_decomposition, npts, global_starts, global_ends, self.pads, shifts)

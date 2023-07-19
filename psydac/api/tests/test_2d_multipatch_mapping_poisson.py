@@ -114,9 +114,9 @@ def test_poisson_2d_2_patches_dirichlet_0():
     D1     = mapping_1(A)
     D2     = mapping_2(B)
 
-    domain = D1.join(D2, name = 'domain',
-                bnd_minus = D1.get_boundary(axis=1, ext=1),
-                bnd_plus  = D2.get_boundary(axis=1, ext=-1))
+    connectivity = [((0,1,1),(1,1,-1))]
+    patches = [D1,D2]
+    domain = Domain.join(patches, connectivity, 'domain')
 
     x,y = domain.coordinates
     solution = x**2 + y**2
@@ -142,9 +142,9 @@ def test_poisson_2d_2_patches_dirichlet_1():
     D1     = mapping_1(A)
     D2     = mapping_2(B)
 
-    domain = D1.join(D2, name = 'domain',
-                bnd_minus = D1.get_boundary(axis=1, ext=1),
-                bnd_plus  = D2.get_boundary(axis=1, ext=-1))
+    connectivity = [((0,1,1),(1,1,-1))]
+    patches = [D1,D2]
+    domain = Domain.join(patches, connectivity, 'domain')
 
     x,y = domain.coordinates
     solution = sin(pi*x)*sin(pi*y)
@@ -173,13 +173,9 @@ def test_poisson_2d_2_patches_dirichlet_2():
     D2     = mapping_2(B)
     D3     = mapping_3(C)
 
-    D1D2      = D1.join(D2, name = 'D1D2',
-                bnd_minus = D1.get_boundary(axis=1, ext=1),
-                bnd_plus  = D2.get_boundary(axis=1, ext=-1))
-
-    domain    = D1D2.join(D3, name = 'D1D2D3',
-                bnd_minus = D2.get_boundary(axis=1, ext=1),
-                bnd_plus  = D3.get_boundary(axis=1, ext=-1))
+    connectivity = [((0,1,1),(1,1,-1)), ((1,1,1),(2,1,-1))]
+    patches = [D1, D2, D3]
+    domain = Domain.join(patches, connectivity, 'domain')
 
     x,y       = domain.coordinates
     solution  = x**2 + y**2
@@ -264,6 +260,46 @@ def test_poisson_2d_2_patches_dirichlet_6():
     assert ( abs(l2_error - expected_l2_error) < 1e-7 )
     assert ( abs(h1_error - expected_h1_error) < 1e-7 )
 
+def test_poisson_2d_4_patch_dirichlet_0():
+
+    A = Square('A',bounds1=(0.2, 0.6), bounds2=(0, np.pi))
+    B = Square('B',bounds1=(0.2, 0.6), bounds2=(np.pi, 2*np.pi))
+    C = Square('C',bounds1=(0.6, 1.), bounds2=(0, np.pi))
+    D = Square('D',bounds1=(0.6, 1.), bounds2=(np.pi, 2*np.pi))
+
+    mapping_1 = PolarMapping('M1',2, c1= 0., c2= 0., rmin = 0., rmax=1.)
+    mapping_2 = PolarMapping('M2',2, c1= 0., c2= 0., rmin = 0., rmax=1.)
+    mapping_3 = PolarMapping('M3',2, c1= 0., c2= 0., rmin = 0., rmax=1.)
+    mapping_4 = PolarMapping('M4',2, c1= 0., c2= 0., rmin = 0., rmax=1.)
+
+    D1     = mapping_1(A)
+    D2     = mapping_2(B)
+    D3     = mapping_3(C)
+    D4     = mapping_4(D)
+
+    connectivity = [((0,1,1),(1,1,-1)), ((2,1,1),(3,1,-1)), ((0,0,1),(2,0,-1)),((1,0,1),(3,0,-1))]
+    patches = [D1, D2, D3, D4]
+    domain = Domain.join(patches, connectivity, 'domain')
+
+    x,y       = domain.coordinates
+    solution  = x**2 + y**2
+    f         = -4
+
+    interiors = domain.interior.args
+    ncells                    = {}
+    ncells[interiors[0].name] = [2**2,2**2]
+    ncells[interiors[1].name] = [2**3,2**3]
+    ncells[interiors[2].name] = [2**3,2**3]
+    ncells[interiors[3].name] = [2**2,2**2]
+
+    l2_error, h1_error, uh = run_poisson_2d(solution, f, domain, ncells=ncells, degree=[2,2])
+
+    expected_l2_error = 1.7195248903000171e-09
+    expected_h1_error = 5.959066397620133e-08
+
+    assert ( abs(l2_error - expected_l2_error) < 1e-7 )
+    assert ( abs(h1_error - expected_h1_error) < 1e-7 )
+
 ###############################################################################
 #            PARALLEL TESTS
 ###############################################################################
@@ -281,9 +317,9 @@ def test_poisson_2d_2_patches_dirichlet_parallel_0():
     D1     = mapping_1(A)
     D2     = mapping_2(B)
 
-    domain = D1.join(D2, name = 'domain',
-                bnd_minus = D1.get_boundary(axis=1, ext=1),
-                bnd_plus  = D2.get_boundary(axis=1, ext=-1))
+    connectivity = [((0,1,1),(1,1,-1))]
+    patches = [D1, D2]
+    domain = Domain.join(patches, connectivity, 'domain')
 
     x,y = domain.coordinates
     solution = sin(pi*x)*sin(pi*y)
@@ -364,6 +400,7 @@ if __name__ == '__main__':
     mappings = OrderedDict([(P.logical_domain, P.mapping) for P in domain.interior])
 
     mappings_list = list(mappings.values())
+    mappings_list = [mapping.get_callable_mapping() for mapping in mappings_list]
 
     from sympy import lambdify
     u_ex = lambdify(domain.coordinates, solution)

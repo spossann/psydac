@@ -13,14 +13,19 @@ from psydac.feec                  import dof_kernels
 from psydac.ddm.cart import DomainDecomposition, CartDecomposition
 
 from psydac.fem.tensor import TensorFemSpace
-from psydac.fem.vector import ProductFemSpace
+from psydac.fem.vector import VectorFemSpace
 
 from abc import ABCMeta, abstractmethod
+
+__all__ = ('GlobalProjector', 'Projector_H1', 'Projector_Hcurl', 'Projector_Hdiv', 'Projector_L2',
+           'evaluate_dofs_1d_0form', 'evaluate_dofs_1d_1form',
+           'evaluate_dofs_2d_0form', 'evaluate_dofs_2d_1form_hcurl', 'evaluate_dofs_2d_1form_hdiv', 'evaluate_dofs_2d_2form',
+           'evaluate_dofs_3d_0form', 'evaluate_dofs_3d_1form', 'evaluate_dofs_3d_2form', 'evaluate_dofs_3d_3form')
 
 #==============================================================================
 class GlobalProjector(metaclass=ABCMeta):
     """
-    A global projector to some TensorFemSpace or ProductFemSpace object.
+    A global projector to some TensorFemSpace or VectorFemSpace object.
     It is constructed over a tensor-product grid in the
     logical domain. The vertices of this grid are obtained as the tensor
     product of the 1D splines' Greville points along each direction.
@@ -34,14 +39,14 @@ class GlobalProjector(metaclass=ABCMeta):
 
     Parameters
     ----------
-    space : ProductFemSpace | TensorFemSpace
+    space : VectorFemSpace | TensorFemSpace
         Some finite element space, codomain of the projection
         operator. The exact structure where to use histopolation and where interpolation
         has to be given by a subclass of the GlobalProjector class.
-        As of now, it is implicitly assumed for a ProductFemSpace, that for each direction
+        As of now, it is implicitly assumed for a VectorFemSpace, that for each direction
         that all spaces with interpolation are the same, and all spaces with histopolation are the same
-        (i.e. yield the same quadrature/interpolation points etc.); so use with care on an arbitrary ProductFemSpace.
-        It is right now only intended to be used with ProductFemSpaces or TensorFemSpaces from DeRham complex objects.
+        (i.e. yield the same quadrature/interpolation points etc.); so use with care on an arbitrary VectorFemSpace.
+        It is right now only intended to be used with VectorFemSpaces or TensorFemSpaces from DeRham complex objects.
 
     nquads : list(int) | tuple(int)
         Number of quadrature points along each direction, to be used in Gauss
@@ -56,7 +61,7 @@ class GlobalProjector(metaclass=ABCMeta):
         if isinstance(space, TensorFemSpace):
             tensorspaces = [space]
             rhsblocks = [self._rhs]
-        elif isinstance(space, ProductFemSpace):
+        elif isinstance(space, VectorFemSpace):
             tensorspaces = space.spaces
             rhsblocks = self._rhs.blocks
         else:
@@ -78,7 +83,7 @@ class GlobalProjector(metaclass=ABCMeta):
         else:
             # for now, we assume that all tensorspaces have the same quad_grids
             # (this seems to be the case at the moment, but maybe checking it might be a good idea nontheless...)
-            uw = [(quad_grid.quad_rule_x,quad_grid.quad_rule_w) for quad_grid in tensorspaces[0].quad_grids]
+            uw = [(quad_grid.quad_rule_x,quad_grid.quad_rule_w) for quad_grid in tensorspaces[0].quad_grids()]
         
         # retrieve projection space structure
         # this is a 2D Python array (first level: block, second level: tensor direction)
@@ -250,7 +255,7 @@ class GlobalProjector(metaclass=ABCMeta):
     def blockcount(self):
         """
         The number of blocks. In case that self.space is a TensorFemSpace, this is 1,
-        otherwise it denotes the number of blocks in the ProductFemSpace.
+        otherwise it denotes the number of blocks in the VectorFemSpace.
         """
         return self._blockcount
     
@@ -342,7 +347,7 @@ class GlobalProjector(metaclass=ABCMeta):
         Parameters
         ----------
         fun : callable or list/tuple of callables
-            Scalar components of the real-valued vector function to be
+            Scalar components of the real- or complex-valued vector function to be
             projected, with arguments the coordinates (x_1, ..., x_N) of a
             point in the logical domain.
 
@@ -356,7 +361,7 @@ class GlobalProjector(metaclass=ABCMeta):
         -------
         field : FemField
             Field obtained by projection (element of the target space-conforming
-            finite element space). This is also a real-valued scalar/vector function
+            finite element space). This is also a real- or complex-valued scalar/vector function
             in the logical domain.
         """
         # build the rhs (degrees of freedom - DOFs)
@@ -410,7 +415,7 @@ class Projector_H1(GlobalProjector):
         Parameters
         ----------
         fun : callable
-            Real-valued scalar function to be projected, with arguments the
+            Real- or complex-valued scalar function to be projected, with arguments the
             coordinates (x_1, ..., x_N) of a point in the logical domain. This
             corresponds to the coefficient of a 0-form.
 
@@ -420,7 +425,7 @@ class Projector_H1(GlobalProjector):
         -------
         field : FemField
             Field obtained by projection (element of the H1-conforming finite
-            element space). This is also a real-valued scalar function in the
+            element space). This is also a real- or complex-valued scalar function in the
             logical domain.
         """
         return super().__call__(fun, dofs_only)
@@ -444,7 +449,7 @@ class Projector_Hcurl(GlobalProjector):
 
     Parameters
     ----------
-    Hcurl : ProductFemSpace
+    Hcurl : VectorFemSpace
         H(curl)-conforming finite element space, codomain of the projection
         operator.
 
@@ -482,7 +487,7 @@ class Projector_Hcurl(GlobalProjector):
         Parameters
         ----------
         fun : list/tuple of callables
-            Scalar components of the real-valued vector function to be
+            Scalar components of the real- or complex-valued vector function to be
             projected, with arguments the coordinates (x_1, ..., x_N) of a
             point in the logical domain. These correspond to the coefficients
             of a 1-form in the canonical basis (dx_1, ..., dx_N).
@@ -493,7 +498,7 @@ class Projector_Hcurl(GlobalProjector):
         -------
         field : FemField
             Field obtained by projection (element of the H(curl)-conforming
-            finite element space). This is also a real-valued vector function
+            finite element space). This is also a real- or complex-valued vector function
             in the logical domain.
         """
         return super().__call__(fun, dofs_only)
@@ -520,7 +525,7 @@ class Projector_Hdiv(GlobalProjector):
 
     Parameters
     ----------
-    Hdiv : ProductFemSpace
+    Hdiv : VectorFemSpace
         H(div)-conforming finite element space, codomain of the projection
         operator.
 
@@ -558,7 +563,7 @@ class Projector_Hdiv(GlobalProjector):
         Parameters
         ----------
         fun : list/tuples of callable
-            Scalar components of the real-valued vector function to be
+            Scalar components of the real- or complex-valued vector function to be
             projected, with arguments the coordinates (x_1, ..., x_N) of a
             point in the logical domain. In 3D these correspond to the
             coefficients of a 2-form in the canonical basis (dx_1 ∧ dx_2,
@@ -570,7 +575,7 @@ class Projector_Hdiv(GlobalProjector):
         -------
         field : FemField
             Field obtained by projection (element of the H(div)-conforming
-            finite element space). This is also a real-valued vector function
+            finite element space). This is also a real- or complex-valued vector function
             in the logical domain.
         """
         return super().__call__(fun, dofs_only)
@@ -619,7 +624,7 @@ class Projector_L2(GlobalProjector):
         Parameters
         ----------
         fun : callable
-            Real-valued scalar function to be projected, with arguments the
+            Real- or complex-valued scalar function to be projected, with arguments the
             coordinates (x_1, ..., x_N) of a point in the logical domain. This
             corresponds to the coefficient of an N-form in N dimensions, in
             the canonical basis dx_1 ∧ ... ∧ dx_N.
@@ -630,7 +635,7 @@ class Projector_L2(GlobalProjector):
         -------
         field : FemField
             Field obtained by projection (element of the L2-conforming finite
-            element space). This is also a real-valued scalar function in the
+            element space). This is also a real- or complex-valued scalar function in the
             logical domain.
         """
         return super().__call__(fun, dofs_only)

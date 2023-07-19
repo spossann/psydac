@@ -8,13 +8,19 @@ from psydac.core.bsplines          import find_span
 from psydac.core.bsplines          import basis_funs_all_ders
 from psydac.fem.splines            import SplineSpace
 from psydac.fem.tensor             import TensorFemSpace
-from psydac.fem.vector             import ProductFemSpace
+from psydac.fem.vector             import ProductFemSpace, VectorFemSpace
 
+__all__ = ('get_points_weights', 'create_collocation_basis',
+           'QuadratureGrid', 'BasisValues', 'CollocationBasisValues')
+
+#==============================================================================
 def get_points_weights(spaces, axis, e):
     for s in spaces:
-        if e in s.quad_grids[axis].indices:
-            i = np.where(s.quad_grids[axis].indices==e)[0][0]
-            return s.quad_grids[axis].points[i:i+1], s.quad_grids[axis].weights[i:i+1]
+        quad_grid_axis = s.quad_grid()[axis]
+        if e in quad_grid_axis.indices:
+            i = np.where(quad_grid_axis.indices==e)[0][0]
+            return quad_grid_axis.points[i:i+1], quad_grid_axis.weights[i:i+1]
+
 #==============================================================================
 class QuadratureGrid():
     def __init__( self, V , axis=None, ext=None, trial_space=None):
@@ -26,14 +32,14 @@ class QuadratureGrid():
         points              = []
         weights             = []
 
-        if isinstance(V, ProductFemSpace):
+        if isinstance(V, (ProductFemSpace, VectorFemSpace)):
             V1 = V.spaces[0]
             spaces = list(V.spaces)
         else:
             V1 = V
             spaces = [V]
 
-        if trial_space  and not isinstance(trial_space, ProductFemSpace):
+        if trial_space  and not isinstance(trial_space, (ProductFemSpace, VectorFemSpace)):
             spaces.append(trial_space)
         elif isinstance(trial_space, ProductFemSpace):
             spaces = spaces + list(trial_space.spaces)
@@ -41,20 +47,21 @@ class QuadratureGrid():
         # calculate the union of the indices in quad_grids, and make sure that all the grids match for each space.
         for i in range(len(V1.spaces)):
 
-            indices.append(reduce(np.union1d,[s.quad_grids[i].indices for s in spaces]))
-            local_element_start.append(V1.quad_grids[i].local_element_start)
-            local_element_end.append  (V1.quad_grids[i].local_element_end)
-            points.append(V1.quad_grids[i].points)
-            weights.append(V1.quad_grids[i].weights)
+            indices.append(reduce(np.union1d,[s.quad_grids()[i].indices for s in spaces]))
+            quad_grid_i = V1.quad_grids()[i]
+            local_element_start.append(quad_grid_i.local_element_start)
+            local_element_end.append  (quad_grid_i.local_element_end)
+            points.append(quad_grid_i.points)
+            weights.append(quad_grid_i.weights)
 
-            for e in np.setdiff1d(indices[-1], V1.quad_grids[i].indices):
-                if e<V1.quad_grids[i].indices[0]:
+            for e in np.setdiff1d(indices[-1], quad_grid_i.indices):
+                if e<quad_grid_i.indices[0]:
                     local_element_start[-1] +=1
                     local_element_end  [-1] +=1
                     p,w = get_points_weights(spaces, i, e)
                     points[-1]  = np.concatenate((p, points[-1]))
                     weights[-1] = np.concatenate((w, weights[-1]))
-                elif e>V1.quad_grids[i].indices[-1]:
+                elif e>quad_grid_i.indices[-1]:
                     p,w = get_points_weights(spaces, i, e)
                     points[-1]  = np.concatenate((points[-1],p))
                     weights[-1] = np.concatenate((weights[-1],w))
@@ -121,7 +128,7 @@ class QuadratureGrid():
         return self._weights
 
     @property
-    def quad_order(self):
+    def nquads(self):
         return [w.shape[1] for w in self.weights]
 
     @property
@@ -162,7 +169,7 @@ class BasisValues():
 
         self._space = V
         assert grid is not None
-        if isinstance(V, ProductFemSpace):
+        if isinstance(V, (ProductFemSpace, VectorFemSpace)):
             starts = V.vector_space.starts
             V      = V.spaces
         else:
@@ -174,7 +181,7 @@ class BasisValues():
 
         weights = grid.weights
         for si,Vi in zip(starts,V):
-            quad_grids  = Vi.quad_grids
+            quad_grids  = Vi.quad_grids()
             spans_i     = []
             basis_i     = []
 

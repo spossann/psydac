@@ -16,7 +16,7 @@ from psydac.ddm.cart       import find_mpi_type, CartDecomposition, InterfaceCar
 from psydac.ddm.utilities  import get_data_exchanger
 from .kernels              import *
 
-__all__ = ['StencilVectorSpace','StencilVector','StencilMatrix', 'StencilInterfaceMatrix']
+__all__ = ('StencilVectorSpace','StencilVector','StencilMatrix', 'StencilInterfaceMatrix')
 
 #===============================================================================
 def compute_diag_len(pads, shifts_domain, shifts_codomain, return_padding=False):
@@ -123,9 +123,11 @@ class StencilVectorSpace( VectorSpace ):
         if cart.is_parallel and not cart.is_comm_null:
             self._mpi_type      = find_mpi_type(dtype)
             if isinstance(cart, InterfaceCartDecomposition):
+                # TODO : Check if this line really change the ._shape
                 self._shape = cart.get_interface_communication_infos(cart.axis)['gbuf_recv_shape'][0]
             else:
                 self._synchronizer = get_data_exchanger( cart, dtype , assembly=True, blocking=False)
+
     #--------------------------------------
     # Abstract interface
     #--------------------------------------
@@ -192,7 +194,7 @@ class StencilVectorSpace( VectorSpace ):
     # ...
     @property
     def parent_starts( self ):
-        return self._starts
+        return self._parent_starts
 
     # ...
     @property
@@ -247,7 +249,7 @@ class StencilVectorSpace( VectorSpace ):
         if cart.is_comm_null: return
         if isinstance(cart, InterfaceCartDecomposition):
             # Case where the patches that share the interface are owned by different intra-communicators
-            space = StencilVectorSpace(cart)
+            space = StencilVectorSpace(cart, dtype=self.dtype)
             self._interfaces[axis, ext] = space
         else:
             # Case where the patches that share the interface are owned by the same intra-communicator
@@ -269,8 +271,10 @@ class StencilVectorSpace( VectorSpace ):
                 if parent_ends[axis] is not None:
                     parent_ends[axis] = self.pads[axis]
 
-            cart = cart.change_starts_ends(starts, ends, parent_starts, parent_ends)
-            space = StencilVectorSpace(cart)
+            cart = cart.change_starts_ends(tuple(starts), tuple(ends), tuple(parent_starts), tuple(parent_ends))
+
+            #TODO Check if we create object from it, otherwise its only purpose is to store some parameters which is innefficient
+            space = StencilVectorSpace(cart, self.dtype)
 
             self._interfaces[axis, ext] = space
 
@@ -329,6 +333,23 @@ class StencilVector( Vector ):
 
     #...
     def dot(self, v):
+        """
+        Return the inner vector product between self and v.
+
+        If the values are real, it returns the classical scalar product.
+        If the values are complex, it returns the classical sesquilinear product with linearity on the vector v.
+
+        Parameters
+        ----------
+        v : StencilVector
+            Vector of the same space than self needed for the scalar product
+
+        Returns
+        -------
+        null: self._space.dtype
+            Scalar containing scalar product of v and self
+
+        """
 
         assert isinstance(v, StencilVector)
         assert v._space is self._space
@@ -346,7 +367,19 @@ class StencilVector( Vector ):
     @staticmethod
     def _dot(v1, v2, pads, shifts):
         index = tuple( slice(m*p,-m*p) for p,m in zip(pads, shifts))
-        return np.dot(v1[index].flat, v2[index].flat)
+        return np.vdot(v1[index].flat, v2[index].flat)
+
+    def conjugate(self, out=None):
+        if out is not None:
+            assert isinstance(out, StencilVector)
+            assert out.space is self.space
+        else:
+            out = StencilVector(self.space)
+        np.conjugate(self._data, out=out._data, casting='no')
+        for axis, ext in self._space.interfaces:
+            np.conjugate(self._interface_data[axis, ext], out=out._interface_data[axis, ext], casting='no')
+        out._sync = self._sync
+        return out
 
     #...
     def copy(self, out=None):
@@ -374,15 +407,6 @@ class StencilVector( Vector ):
         np.multiply(self._data, a, out=w._data)
         for axis, ext in self._space.interfaces:
             np.multiply(self._interface_data[axis, ext], a, out=w._interface_data[axis, ext])
-        w._sync = self._sync
-        return w
-
-    #...
-    def __rmul__(self, a):
-        w = StencilVector( self._space )
-        np.multiply(a, self._data, out=w._data)
-        for axis, ext in self._space.interfaces:
-            np.multiply(a, self._interface_data[axis, ext], out=w._interface_data[axis, ext])
         w._sync = self._sync
         return w
 
@@ -503,7 +527,7 @@ class StencilVector( Vector ):
 
     # ...
     def _toarray_parallel_no_pads(self, order='C'):
-        a         = np.zeros( self.space.npts )
+        a         = np.zeros( self.space.npts, self.dtype )
         idx_from  = tuple( slice(m*p,-m*p) for p,m in zip(self.pads, self.space.shifts) )
         idx_to    = tuple( slice(s,e+1) for s,e in zip(self.starts,self.ends) )
         a[idx_to] = self._data[idx_from]
@@ -515,7 +539,7 @@ class StencilVector( Vector ):
         pads = [m*p for m,p in zip(self.space.shifts, self.pads)]
         # Step 0: create extended n-dimensional array with zero values
         shape = tuple( n+2*p for n,p in zip( self.space.npts, pads ) )
-        a = np.zeros( shape )
+        a = np.zeros( shape, self.dtype )
 
         # Step 1: write extended data chunk (local to process) onto array
         idx = tuple( slice(s,e+2*p+1) for s,e,p in
@@ -693,6 +717,7 @@ class StencilVector( Vector ):
             self._data[idx_from] = 0.
             idx_from = tuple( idx_front + [ slice(0,m*p)] + idx_back )
             self._data[idx_from] = 0.
+
     # ...
     def _exchange_assembly_data_serial(self):
 
@@ -758,6 +783,8 @@ class StencilMatrix( LinearOperator ):
         assert isinstance( V, StencilVectorSpace )
         assert isinstance( W, StencilVectorSpace )
         assert W.pads == V.pads
+        if not W.dtype==V.dtype:
+            raise NotImplementedError("The domain and the codomain should have the same data type.")
 
         if pads is not None:
             for p,vp in zip(pads, V.pads):
@@ -820,7 +847,6 @@ class StencilMatrix( LinearOperator ):
         if backend:
             self.set_backend(backend, precompiled)
 
-
     #--------------------------------------
     # Abstract interface
     #--------------------------------------
@@ -840,6 +866,25 @@ class StencilMatrix( LinearOperator ):
 
     # ...
     def dot( self, v, out=None):
+        """
+        Return the matrix/vector product between self and v.
+        This function optimized this product.
+
+        Parameters
+        ----------
+        v   : StencilVector
+            Vector of the domain of self needed for the Matrix/Vector product
+
+        out : StencilVector
+            Vector of the codomain of self
+
+        Returns
+        -------
+        out : StencilVector
+            Vector of the codomain of self, contain the result of the product
+
+        """
+
 
         assert isinstance( v, StencilVector )
         assert v.space is self.domain
@@ -855,6 +900,47 @@ class StencilMatrix( LinearOperator ):
             v.update_ghost_regions()
 
         self._func(self._data, v._data, out._data, **self._args)
+
+        # IMPORTANT: flag that ghost regions are not up-to-date
+        out.ghost_regions_in_sync = False
+        return out
+
+    def vdot( self, v, out=None):
+        """
+        Return the matrix/vector product between the conjugate of self and v.
+        This function optimized this product.
+
+        Parameters
+        ----------
+        v   : StencilVector
+            Vector of the domain of self needed for the Matrix/Vector product
+
+        out : StencilVector
+            Vector of the codomain of self
+
+        Returns
+        -------
+        out : StencilVector
+            Vector of the codomain of self, contain the result of the product
+
+        """
+
+        assert isinstance( v, StencilVector )
+        assert v.space is self.domain
+
+        if out is not None:
+            assert isinstance( out, StencilVector )
+            assert out.space is self.codomain
+        else:
+            out = StencilVector( self.codomain )
+
+        # Necessary if vector space is distributed across processes
+        if not v.ghost_regions_in_sync:
+            v.update_ghost_regions()
+
+        # Instead of computing A_*x, this function computes (A*x_)_
+        self._func(self._data, np.conjugate(v._data), out._data, **self._args)
+        np.conjugate(out._data, out=out._data)
 
         # IMPORTANT: flag that ghost regions are not up-to-date
         out.ghost_regions_in_sync = False
@@ -902,9 +988,9 @@ class StencilMatrix( LinearOperator ):
                     out[ii] = np.dot( mat[ii_kk].flat, x[jj].flat )
 
             new_nrows[d] += er
-
+            
     # ...
-    def transpose( self ):
+    def transpose(self, conjugate=False):
         """ Create new StencilMatrix Mt, where domain and codomain are swapped
             with respect to original matrix M, and Mt_{ij} = M_{ji}.
         """
@@ -919,7 +1005,10 @@ class StencilMatrix( LinearOperator ):
         Mt = StencilMatrix(M.codomain, M.domain, pads=self._pads, backend=self._backend)
 
         # Call low-level '_transpose' function (works on Numpy arrays directly)
-        self._transpose_func(M._data, Mt._data, **self._transpose_args)
+        if conjugate:
+            self._transpose_func(np.conjugate(M._data), Mt._data, **self._transpose_args)
+        else:
+            self._transpose_func(M._data, Mt._data, **self._transpose_args)
         return Mt
 
     @staticmethod
@@ -978,43 +1067,12 @@ class StencilMatrix( LinearOperator ):
         return coo
 
     #--------------------------------------
-    # Other properties/methods
+    # Overridden properties/methods
     #--------------------------------------
+    def __neg__(self):
+        return self.__mul__(-1)
 
     # ...
-    @property
-    def pads( self ):
-        return self._pads
-
-    # ...
-    @property
-    def backend( self ):
-        return self._backend
-
-    # ...
-    def __getitem__(self, key):
-        index = self._getindex( key )
-        return self._data[index]
-
-    # ...
-    def __setitem__(self, key, value):
-        index = self._getindex( key )
-        self._data[index] = value
-
-
-    #...
-    def max( self ):
-        return self._data.max()
-
-    #...
-    def copy( self ):
-        M = StencilMatrix( self.domain, self.codomain, self._pads, self._backend )
-        M._data[:] = self._data[:]
-        M._func    = self._func
-        M._args    = self._args
-        return M
-
-    #...
     def __mul__( self, a ):
         w = StencilMatrix( self._domain, self._codomain, self._pads, self._backend )
         w._data = self._data * a
@@ -1022,19 +1080,6 @@ class StencilMatrix( LinearOperator ):
         w._args = self._args
         w._sync = self._sync
         return w
-
-    #...
-    def __rmul__( self, a ):
-        w = StencilMatrix( self._domain, self._codomain, self._pads, self._backend )
-        w._data = a * self._data
-        w._func = self._func
-        w._args = self._args
-        w._sync = self._sync
-        return w
-
-    # ...
-    def __neg__(self):
-        return self.__mul__(-1)
 
     #...
     def __add__(self, m):
@@ -1078,10 +1123,59 @@ class StencilMatrix( LinearOperator ):
         else:
             return LinearOperator.__sub__(self, m)
 
+    #--------------------------------------
+    # New properties/methods
+    #--------------------------------------
+
+    # TODO: check if this method is really needed!!
+    def conjugate(self, out=None):
+        if out is not None:
+            assert isinstance(out, StencilMatrix)
+            assert out.domain is self.domain
+            assert out.codomain is self.codomain
+        else:
+            out = StencilMatrix(self.domain, self.codomain, pads=self.pads)
+            out._func    = self._func
+            out._args    = self._args
+        np.conjugate(self._data, out=out._data, casting='no')
+        return out
+
     # ...
-    def __truediv__(self, a):
-        """ Divide by scalar. """
-        return self * (1.0 / a)
+    # TODO: check if this method is really needed!!
+    def conj(self, out=None):
+        return self.conjugate(out=out)
+
+    # ...
+    @property
+    def pads( self ):
+        return self._pads
+
+    # ...
+    @property
+    def backend( self ):
+        return self._backend
+
+    # ...
+    def __getitem__(self, key):
+        index = self._getindex( key )
+        return self._data[index]
+
+    # ...
+    def __setitem__(self, key, value):
+        index = self._getindex( key )
+        self._data[index] = value
+
+    #...
+    def max( self ):
+        return self._data.max()
+
+    #...
+    def copy( self ):
+        M = StencilMatrix( self.domain, self.codomain, self._pads, self._backend )
+        M._data[:] = self._data[:]
+        M._func    = self._func
+        M._args    = self._args
+        return M
 
     #...
     def __imul__(self, a):
@@ -1114,12 +1208,6 @@ class StencilMatrix( LinearOperator ):
         else:
             return LinearOperator.__sub__(self, m)
 
-    # ...
-    def __itruediv__(self, a):
-        """ Divide by scalar, in place. """
-        self *= 1.0 / a
-        return self
-
     #...
     def __abs__( self ):
         w = StencilMatrix( self._domain, self._codomain, self._pads, self._backend )
@@ -1137,7 +1225,6 @@ class StencilMatrix( LinearOperator ):
 
         """
         # TODO: access 'self._data' directly for increased efficiency
-        # TODO: add unit tests
 
         ndim  = self._domain.ndim
 
@@ -1236,11 +1323,6 @@ class StencilMatrix( LinearOperator ):
                 idx_to   = tuple( idx_front + [slice( m*p, m*p+p)] + idx_back )
                 idx_from = tuple( idx_front + [ slice(-m*p,-m*p+p) if (-m*p+p)!=0 else slice(-m*p,None)] + idx_back )
                 self._data[idx_to] += self._data[idx_from]
-
-    # ...
-    @property
-    def T(self):
-        return self.transpose()
 
     def diagonal(self):
         if self._diag_indices is None:
@@ -1357,6 +1439,7 @@ class StencilMatrix( LinearOperator ):
         M.eliminate_zeros()
 
         return M
+
     #...
     def _tocoo_no_pads( self , order='C'):
 
@@ -1697,7 +1780,8 @@ class StencilMatrix( LinearOperator ):
                                     gpads=(self._args['gpads'],),
                                     pads=(self._args['pads'],),
                                     dm = (self._args['dm'],),
-                                    cm = (self._args['cm'],))
+                                    cm = (self._args['cm'],),
+                                    dtype=self.dtype)
 
                     starts = self._args.pop('starts')
                     nrows  = self._args.pop('nrows')
@@ -1723,7 +1807,8 @@ class StencilMatrix( LinearOperator ):
                                             gpads=(self._args['gpads'],),
                                             pads=(self._args['pads'],),
                                             dm = (self._args['dm'],),
-                                            cm = (self._args['cm'],))
+                                            cm = (self._args['cm'],),
+                                            dtype=self.dtype)
 
                     starts      = self._args.pop('starts')
                     nrows       = self._args.pop('nrows')
@@ -1755,7 +1840,8 @@ class StencilMatrix( LinearOperator ):
                                         gpads=(self._args['gpads'],),
                                         pads=(self._args['pads'],),
                                         dm = (self._args['dm'],),
-                                        cm = (self._args['cm'],))
+                                        cm = (self._args['cm'],),
+                                        dtype=self.dtype)
                 self._args.pop('nrows')
                 self._args.pop('nrows_extra')
                 self._args.pop('gpads')
@@ -1796,6 +1882,20 @@ class StencilInterfaceMatrix(LinearOperator):
     s_c : int
           The starting index of the codomain.
 
+    d_axis : int
+          The axis of the Interface of the domain.
+
+    c_axis : int
+          The axis of the Interface of the codomain.
+
+    d_ext : int
+          The extremity of the domain Interface space.
+          the values must be 1 or -1.
+
+    c_ext : int
+          The extremity of the codomain Interface space.
+          the values must be 1 or -1.
+
     dim : int
           The axis of the interface.
 
@@ -1819,7 +1919,7 @@ class StencilInterfaceMatrix(LinearOperator):
         dims           = list(W.shape)
 
         if W.parent_ends[c_axis] is not None:
-            diff = min(1,W.parent_ends[c_axis]-W.ends[c_axis])
+            diff = min(1, W.parent_ends[c_axis]-W.ends[c_axis])
         else:
             diff = 0
 
@@ -1925,8 +2025,13 @@ class StencilInterfaceMatrix(LinearOperator):
         if out is not None:
             assert isinstance( out, StencilVector )
             assert out.space is self.codomain
+            out[(slice(None,None),)*v.space.ndim] = 0.
         else:
             out = StencilVector( self.codomain )
+
+        # Necessary if vector space is distributed across processes
+        if not v.ghost_regions_in_sync and not v.space.parallel:
+            v.update_ghost_regions()
 
         self._func(self._data, v._interface_data[self._domain_axis, self._domain_ext], out._data, **self._args)
         # IMPORTANT: flag that ghost regions are not up-to-date
@@ -1981,17 +2086,8 @@ class StencilInterfaceMatrix(LinearOperator):
 
             new_nrows[d] += er
 
-    def __truediv__(self, a):
-        """ Divide by scalar. """
-        return self * (1.0 / a)
-
-    def __itruediv__(self, a):
-        """ Divide by scalar, in place. """
-        self *= 1.0 / a
-        return self
-
     # ...
-    def transpose( self , Mt=None):
+    def transpose( self, conjugate=False, Mt=None):
         """ Create new StencilInterfaceMatrix Mt, where domain and codomain are swapped
             with respect to original matrix M, and Mt_{ij} = M_{ji}.
         """
@@ -2006,7 +2102,10 @@ class StencilInterfaceMatrix(LinearOperator):
                                         flip=M.flip, pads=M.pads, backend=M.backend)
 
         # Call low-level '_transpose' function (works on Numpy arrays directly)
-        M._transpose_func(M._data, Mt._data, **M._transpose_args)
+        if conjugate:
+            M._transpose_func(np.conjugate(M._data), Mt._data, **M._transpose_args)
+        else:
+            M._transpose_func(M._data, Mt._data, **M._transpose_args)
         return Mt
 
     @staticmethod
@@ -2148,13 +2247,6 @@ class StencilInterfaceMatrix(LinearOperator):
         return w
 
     #...
-    def __rmul__( self, a ):
-        w = self.copy()
-        w._data = a * w._data
-        w._sync = self._sync
-        return w
-
-    #...
     def __add__(self, m):
         raise NotImplementedError('TODO: StencilInterfaceMatrix.__add__')
 
@@ -2164,7 +2256,7 @@ class StencilInterfaceMatrix(LinearOperator):
 
     #...
     def __imul__(self, a):
-        raise NotImplementedError('TODO: StencilInterfaceMatrix.__imul__')
+        self._data *= a
 
     #...
     def __iadd__(self, m):
@@ -2211,7 +2303,7 @@ class StencilInterfaceMatrix(LinearOperator):
     # ...
     @property
     def dim( self ):
-        return self._dim
+        return self._ndim
 
     # ...
     @property
@@ -2248,7 +2340,6 @@ class StencilInterfaceMatrix(LinearOperator):
         return self._data.max()
 
     # ...
-
     @property
     def backend( self ):
         return self._backend
@@ -2283,6 +2374,7 @@ class StencilInterfaceMatrix(LinearOperator):
             return slice(start, stop, index.step)
         else:
             return index + shift
+
     #...
     def _tocoo_no_pads( self ):
         # Shortcuts
@@ -2428,7 +2520,6 @@ class StencilInterfaceMatrix(LinearOperator):
                 idx_from = tuple( idx_front + [ slice(-m*p,-m*p+p) if (-m*p+p)!=0 else slice(-m*p,None)] + idx_back )
                 self._data[idx_to] += self._data[idx_from]
 
-
     def set_backend(self, backend):
         from psydac.api.ast.linalg import LinearOperatorDot, InterfaceTransposeOperator
         self._backend         = backend
@@ -2483,7 +2574,8 @@ class StencilInterfaceMatrix(LinearOperator):
                                     flip_axis=self._flip,
                                     interface_axis=self._codomain_axis,
                                     d_start=(self._domain_start,),
-                                    c_start=(self._codomain_start,))
+                                    c_start=(self._codomain_start,),
+                                    dtype= self.dtype)
 
                     starts = self._args.pop('starts')
                     nrows  = self._args.pop('nrows')
@@ -2509,7 +2601,8 @@ class StencilInterfaceMatrix(LinearOperator):
                                             flip_axis=self._flip,
                                             interface_axis=self._codomain_axis,
                                             d_start=(self._domain_start,),
-                                            c_start=(self._codomain_start,))
+                                            c_start=(self._codomain_start,),
+                                            dtype= self.dtype)
 
                     starts      = self._args.pop('starts')
                     nrows       = self._args.pop('nrows')
@@ -2543,11 +2636,13 @@ class StencilInterfaceMatrix(LinearOperator):
                                         flip_axis=self._flip,
                                         interface_axis=self._codomain_axis,
                                         d_start=(self._domain_start,),
-                                        c_start=(self._codomain_start,))
+                                        c_start=(self._codomain_start,),
+                                        dtype= self.dtype)
 
                 self._args = {}
 
             self._func = dot.func
+
 #===============================================================================
 from psydac.api.settings   import PSYDAC_BACKENDS
 del VectorSpace, Vector
