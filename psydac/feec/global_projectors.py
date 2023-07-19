@@ -15,6 +15,7 @@ from psydac.ddm.cart import DomainDecomposition, CartDecomposition
 from psydac.fem.tensor import TensorFemSpace
 from psydac.fem.vector import VectorFemSpace
 
+
 from abc import ABCMeta, abstractmethod
 
 __all__ = ('GlobalProjector', 'Projector_H1', 'Projector_Hcurl', 'Projector_Hdiv', 'Projector_L2',

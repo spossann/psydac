@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name            = "psydac"
-version         = "0.1"
+version         = "0.1.1"
 description     = "Python package for isogeometric analysis (IGA)"
 readme          = "README.md"
 requires-python = ">= 3.8, < 3.12"
@@ -33,7 +33,7 @@ dependencies = [
 
     # Our packages from PyPi
     'sympde == 0.17.2',
-    'pyccel >= 1.8.1',
+    'pyccel >= 1.7.4',
     'gelato == 0.12',
 
     # Alternative backend to Pyccel is Numba

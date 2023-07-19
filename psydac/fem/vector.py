@@ -13,6 +13,8 @@ from psydac.linalg.stencil import StencilVectorSpace
 from psydac.linalg.block   import BlockVectorSpace
 from psydac.fem.basic      import FemSpace, FemField
 
+from sympde.topology import ProductSpace
+
 from psydac.core.kernels import (pushforward_2d_hdiv,
                                  pushforward_3d_hdiv,
                                  pushforward_2d_hcurl,
@@ -58,7 +60,8 @@ class VectorFemSpace( FemSpace ):
 
         self._symbolic_space = None
         if all(s.symbolic_space for s in spaces):
-            self._symbolic_space = reduce(lambda x,y:x.symbolic_space*y.symbolic_space, spaces)
+            if not isinstance(spaces[0].symbolic_space*spaces[1].symbolic_space, ProductSpace):
+                self._symbolic_space = reduce(lambda x,y:x.symbolic_space*y.symbolic_space, spaces)
 
         self._vector_space     = BlockVectorSpace(*[V.vector_space for V in self.spaces])
         self._refined_space    = {}
