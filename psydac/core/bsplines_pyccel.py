@@ -866,7 +866,8 @@ def elevate_knots_p(knots: 'float[:]', degree: int, periodic: bool, out: 'float[
         It should be of the appropriate shape and dtype.
     """
     if periodic:
-        T, p = knots, degree
+        T = knots
+        p = degree
         period = T[len(knots) -1 - p] - T[p]
         left   = T[len(knots) -2 - 2 * p] - period
         right  = T[2 * p + 1] + period
