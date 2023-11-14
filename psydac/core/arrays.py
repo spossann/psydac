@@ -92,3 +92,25 @@ def max_vec(a: 'float[:]') -> float:
             out = a[i] 
             
     return out
+
+
+@pure
+def max_vec_int(a: 'int[:]') -> int:
+    """
+    Compute the maximum a 1D vector.
+
+    Parameters
+    ----------
+        a : array[float]
+            The 1D vector.
+    """
+
+    out = a[0]
+    
+    sh_a = shape(a)
+
+    for i in range(sh_a[0]):
+        if a[i] > out:
+            out = a[i] 
+            
+    return out
