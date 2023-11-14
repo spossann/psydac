@@ -3476,7 +3476,7 @@ def eval_jacobians_inv_2d(nc1: int, nc2: int,  f_p1: int, f_p2: int, k1: int, k2
                     det = x_x1 * y_x2 - x_x2 * y_x1
                     
                     tmp_a[:] = np.array([[y_x2, - x_x2],
--                                        [- y_x1, x_x1]]) 
+                                         [- y_x1, x_x1]]) 
 
                     jacobians_inv[i_cell_1 * k1 + i_quad_1,
                                   i_cell_2 * k2 + i_quad_2,
