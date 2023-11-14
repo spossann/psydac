@@ -3,6 +3,7 @@
 # like Numpy functions.
 
 import numpy as np
+from psydac.core.arrays import matmul, sum_vec, min_vec, max_vec
 
 # =============================================================================
 def find_span_p(knots: 'float[:]', degree: int, x: float):
@@ -322,7 +323,7 @@ def basis_funs_all_ders_p(knots: 'float[:]', degree: int, x: float, span: int, n
             j2 = k-1 if (r-1 <= pk) else degree-r
 
             a[s2, j1:j2 + 1] = (a[s1, j1:j2 + 1] - a[s1, j1 - 1:j2]) * ndu[pk + 1, rk + j1:rk + j2 + 1]
-            temp_d[:, :] = np.matmul(a[s2:s2 + 1, j1:j2 + 1], ndu[rk + j1:rk + j2 + 1, pk: pk + 1])
+            matmul(a[s2:s2 + 1, j1:j2 + 1], ndu[rk + j1:rk + j2 + 1, pk: pk + 1], temp_d)
             d+= temp_d[0, 0]
             if r <= pk:
                a[s2, k] = - a[s1, k - 1] * ndu[pk + 1, r]
@@ -574,7 +575,7 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
             jend = min(spans[i + 1], n)
             # Compute non-zero values of histopolation matrix
             for j in range(1 + jstart, jend + 1):
-                s = np.sum(colloc[i, 0:j]) - np.sum(colloc[i + 1, 0:j])
+                s = sum_vec(colloc[i, 0:j]) - sum_vec(colloc[i + 1, 0:j])
                 H[i, j - 1] = s
 
     else:
@@ -586,7 +587,7 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
             jend = min(spans[i + 1], n)
             # Compute non-zero values of histopolation matrix
             for j in range(1 + jstart, jend + 1):
-                s = np.sum(colloc[i, 0:j]) - np.sum(colloc[i + 1, 0:j])
+                s = sum_vec(colloc[i, 0:j]) - sum_vec(colloc[i + 1, 0:j])
                 H[i, j - 1] = s * integrals[j - 1]
 
     # Mitigate round-off errors
@@ -714,10 +715,10 @@ def greville_p(knots: 'float[:]', degree: int, periodic: bool, out:'float[:]'):
     # Compute greville abscissas as average of p consecutive knot values
     if p == 0:
         for i in range(n):
-            out[i] = sum(T[i:i + 2]) / 2
+            out[i] = sum_vec(T[i:i + 2]) / 2
     else:
         for i in range(1, 1+n):
-            out[i - 1] = sum(T[i:i + p]) / p
+            out[i - 1] = sum_vec(T[i:i + p]) / p
 
     # Domain boundaries
     a = T[p]
@@ -1056,8 +1057,8 @@ def cell_index_p(breaks: 'float[:]', i_grid: 'float[:]', tol: float, out: 'int[:
     nbk = len(breaks)
 
     # Check if there are points outside the domain
-    if np.min(i_grid) < breaks[0] - tol: return 1
-    if np.max(i_grid) > breaks[nbk - 1] + tol: return 1
+    if min_vec(i_grid) < breaks[0] - tol: return 1
+    if max_vec(i_grid) > breaks[nbk - 1] + tol: return 1
 
     current_index = 0
     while current_index < nx:

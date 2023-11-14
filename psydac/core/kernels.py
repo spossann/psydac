@@ -3267,6 +3267,8 @@ def eval_jacobians_inv_3d(nc1: int, nc2: int, nc3: int,  f_p1: int, f_p2: int,
     arr_z_x2 = np.zeros_like(global_arr_coeff_z, shape=(k1, k2, k3))
     arr_z_x3 = np.zeros_like(global_arr_coeff_z, shape=(k1, k2, k3))
 
+    tmp_a = np.zeros((3, 3), dtype=float)
+
     for i_cell_1 in range(nc1):
         span_1 = global_spans_1[i_cell_1]
 
@@ -3361,12 +3363,14 @@ def eval_jacobians_inv_3d(nc1: int, nc2: int, nc3: int,  f_p1: int, f_p2: int,
                             a_32 = - x_x1 * y_x3 + x_x3 * y_x1
                             a_33 = x_x1 * y_x2 - x_x2 * y_x1
 
+                            tmp_a[:] = np.array([[a_11, a_21, a_31],
+                                                 [a_12, a_22, a_32],
+                                                 [a_13, a_23, a_33]])
+
                             jacobians_inv[i_cell_1 * k1 + i_quad_1,
                                           i_cell_2 * k2 + i_quad_2,
                                           i_cell_3 * k3 + i_quad_3,
-                                          :, :] = np.array([[a_11, a_21, a_31],
-                                                            [a_12, a_22, a_32],
-                                                            [a_13, a_23, a_33]]) / det
+                                          :, :] = tmp_a / det
 
 
 @template(name='T', types=['float[:,:]', 'complex[:,:]'])
@@ -3420,6 +3424,8 @@ def eval_jacobians_inv_2d(nc1: int, nc2: int,  f_p1: int, f_p2: int, k1: int, k2
 
     arr_y_x1 = np.zeros_like(global_arr_coeff_y, shape=(k1, k2))
     arr_y_x2 = np.zeros_like(global_arr_coeff_y, shape=(k1, k2))
+    
+    tmp_a = np.zeros((2, 2), dtype=float)
 
     for i_cell_1 in range(nc1):
         span_1 = global_spans_1[i_cell_1]
@@ -3468,11 +3474,13 @@ def eval_jacobians_inv_2d(nc1: int, nc2: int,  f_p1: int, f_p2: int, k1: int, k2
                     y_x2 = arr_y_x2[i_quad_1, i_quad_2]
 
                     det = x_x1 * y_x2 - x_x2 * y_x1
+                    
+                    tmp_a[:] = np.array([[y_x2, - x_x2],
+-                                        [- y_x1, x_x1]]) 
 
                     jacobians_inv[i_cell_1 * k1 + i_quad_1,
                                   i_cell_2 * k2 + i_quad_2,
-                                  :, :] = np.array([[y_x2, - x_x2],
-                                                    [- y_x1, x_x1]]) / det
+                                  :, :] = tmp_a / det
 
 
 # -----------------------------------------------------------------------------
@@ -3551,6 +3559,8 @@ def eval_jacobians_inv_irregular_3d(np1: int, np2: int, np3: int, f_p1: int, f_p
     temp_z_x1 = arr_coeffs_x[0,0,0]-arr_coeffs_x[0,0,0]
     temp_z_x2 = arr_coeffs_y[0,0,0]-arr_coeffs_y[0,0,0]
     temp_z_x3 = arr_coeffs_z[0,0,0]-arr_coeffs_z[0,0,0]
+    
+    tmp_a = np.zeros((3, 3), dtype=float)
 
     for i_p_1 in range(np1):
         i_cell_1 = cell_index_1[i_p_1]
@@ -3639,12 +3649,14 @@ def eval_jacobians_inv_irregular_3d(np1: int, np2: int, np3: int, f_p1: int, f_p
                 a_32 = - temp_x_x1 * temp_y_x3 + temp_x_x3 * temp_y_x1
                 a_33 = temp_x_x1 * temp_y_x2 - temp_x_x2 * temp_y_x1
 
+                tmp_a[:] = np.array([[a_11, a_21, a_31],
+                                  [a_12, a_22, a_32],
+                                  [a_13, a_23, a_33]])
+
                 jacobians_inv[i_p_1,
                                 i_p_2,
                                 i_p_3,
-                                :, :] = np.array([[a_11, a_21, a_31],
-                                                  [a_12, a_22, a_32],
-                                                  [a_13, a_23, a_33]]) / det
+                                :, :] = tmp_a / det
 
 
 @template(name='T', types=['float[:,:]', 'complex[:,:]'])
@@ -3698,7 +3710,8 @@ def eval_jacobians_inv_irregular_2d(np1: int, np2: int, f_p1: int, f_p2: int, ce
 
     temp_y_x1 = arr_coeffs_x[0,0]-arr_coeffs_x[0,0]
     temp_y_x2 = arr_coeffs_y[0,0]-arr_coeffs_y[0,0]
-
+    
+    tmp_a = np.zeros((2, 2), dtype=float)
 
     for i_p_1 in range(np1):
         i_cell_1 = cell_index_1[i_p_1]
@@ -3742,8 +3755,9 @@ def eval_jacobians_inv_irregular_2d(np1: int, np2: int, f_p1: int, f_p2: int, ce
 
             det = temp_x_x1 * temp_y_x2 - temp_y_x1 * temp_x_x2
 
-            jacobians_inv[i_p_1, i_p_2, :, :] = np.array([[temp_y_x2, - temp_x_x2],
-                                                          [- temp_y_x1, temp_x_x1]]) / det
+            tmp_a[:] = np.array([[temp_y_x2, - temp_x_x2], [- temp_y_x1, temp_x_x1]])
+
+            jacobians_inv[i_p_1, i_p_2, :, :] = tmp_a / det
 
 # -----------------------------------------------------------------------------
 # 3: Regular tensor grid with weights
@@ -3836,6 +3850,8 @@ def eval_jacobians_inv_3d_weights(nc1: int, nc2: int, nc3: int,  f_p1: int, f_p2
     arr_weights_x1 = np.zeros((k1, k2, k3))
     arr_weights_x2 = np.zeros((k1, k2, k3))
     arr_weights_x3 = np.zeros((k1, k2, k3))
+
+    tmp_a = np.zeros((3, 3), dtype=float)
 
     for i_cell_1 in range(nc1):
         span_1 = global_spans_1[i_cell_1]
@@ -3983,12 +3999,14 @@ def eval_jacobians_inv_3d_weights(nc1: int, nc2: int, nc3: int,  f_p1: int, f_p2
                             a_32 = - x_x1 * y_x3 + x_x3 * y_x1
                             a_33 = x_x1 * y_x2 - x_x2 * y_x1
 
+                            tmp_a[:] = np.array([[a_11, a_21, a_31],
+                                                 [a_12, a_22, a_32],
+                                                 [a_13, a_23, a_33]])
+
                             jacobians_inv[i_cell_1 * k1 + i_quad_1,
                                           i_cell_2 * k2 + i_quad_2,
                                           i_cell_3 * k3 + i_quad_3,
-                                          :, :] = np.array([[a_11, a_21, a_31],
-                                                            [a_12, a_22, a_32],
-                                                            [a_13, a_23, a_33]]) / det
+                                          :, :] = tmp_a / det
 
 
 @template(name='T', types=['float[:,:]', 'complex[:,:]'])
@@ -4055,6 +4073,8 @@ def eval_jacobians_inv_2d_weights(nc1: int, nc2: int,  f_p1: int, f_p2: int, k1:
 
     arr_weights_x1 = np.zeros((k1, k2))
     arr_weights_x2 = np.zeros((k1, k2))
+
+    tmp_a = np.zeros((2, 2), dtype=float)
 
     for i_cell_1 in range(nc1):
         span_1 = global_spans_1[i_cell_1]
@@ -4142,10 +4162,12 @@ def eval_jacobians_inv_2d_weights(nc1: int, nc2: int,  f_p1: int, f_p2: int, k1:
 
                     det = x_x1 * y_x2 - x_x2 * y_x1
 
+                    tmp_a[:] = np.array([[y_x2, - x_x2],
+                                         [- y_x1, x_x1]])
+
                     jacobians_inv[i_cell_1 * k1 + i_quad_1,
                                   i_cell_2 * k2 + i_quad_2,
-                                  :, :] = np.array([[y_x2, - x_x2],
-                                                    [- y_x1, x_x1]]) / det
+                                  :, :] = tmp_a / det
 
 
 # -----------------------------------------------------------------------------
@@ -4233,6 +4255,8 @@ def eval_jacobians_inv_irregular_3d_weights(np1: int, np2: int, np3: int, f_p1: 
     temp_z_x1 = arr_coeffs_x[0,0,0]-arr_coeffs_x[0,0,0]
     temp_z_x2 = arr_coeffs_y[0,0,0]-arr_coeffs_y[0,0,0]
     temp_z_x3 = arr_coeffs_z[0,0,0]-arr_coeffs_z[0,0,0]
+
+    tmp_a = np.zeros((3, 3), dtype=float)
 
     for i_p_1 in range(np1):
         i_cell_1 = cell_index_1[i_p_1]
@@ -4359,12 +4383,14 @@ def eval_jacobians_inv_irregular_3d_weights(np1: int, np2: int, np3: int, f_p1: 
                 a_32 = - x_x1 * y_x3 + x_x3 * y_x1
                 a_33 = x_x1 * y_x2 - x_x2 * y_x1
 
+                tmp_a[:] = np.array([[a_11, a_21, a_31],
+                                     [a_12, a_22, a_32],
+                                     [a_13, a_23, a_33]])
+
                 jacobians_inv[i_p_1,
                               i_p_2,
                               i_p_3,
-                              :, :] = np.array([[a_11, a_21, a_31],
-                                                [a_12, a_22, a_32],
-                                                [a_13, a_23, a_33]]) / det
+                              :, :] = tmp_a / det
 
 
 @template(name='T', types=['float[:,:]', 'complex[:,:]'])
@@ -4429,6 +4455,8 @@ def eval_jacobians_inv_irregular_2d_weights(np1: int, np2: int, f_p1: int, f_p2:
 
     temp_y_x1 = arr_coeffs_x[0,0]-arr_coeffs_x[0,0]
     temp_y_x2 = arr_coeffs_y[0,0]-arr_coeffs_y[0,0]
+    
+    tmp_a = np.zeros((2, 2), dtype=float)
 
     for i_p_1 in range(np1):
         i_cell_1 = cell_index_1[i_p_1]
@@ -4501,8 +4529,9 @@ def eval_jacobians_inv_irregular_2d_weights(np1: int, np2: int, f_p1: int, f_p2:
 
             det = x_x1 * y_x2 - x_x2 * y_x1
 
-            jacobians_inv[i_p_1, i_p_2, :, :] = np.array([[y_x2, - x_x2],
-                                                          [- y_x1, x_x1]]) / det
+            tmp_a[:] = np.array([[y_x2, - x_x2], [- y_x1, x_x1]])
+
+            jacobians_inv[i_p_1, i_p_2, :, :] = tmp_a / det
 
 
 # ==========================================================================
