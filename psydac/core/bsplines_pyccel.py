@@ -998,7 +998,7 @@ def basis_ders_on_quad_grid_p(knots: 'float[:]', degree: int, quad_grid: 'float[
         . id: derivative             (0 <= id <= nders )
         . iq: local quadrature point (0 <= iq <  nq    )
     """
-    ne, nq = quad_grid.shape
+    ne = quad_grid.shape[0]
     if normalization:
         integrals = np.zeros(knots.shape[0] - degree - 1)
         basis_integrals_p(knots, degree, integrals)
