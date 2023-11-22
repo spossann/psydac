@@ -171,6 +171,6 @@ def test_solver_tridiagonal(n, p, dtype, pc, solver, verbose=False):
 #===============================================================================
 
 if __name__ == "__main__":
-    import sys
-    pytest.main( sys.argv )
-    #test_solver_tridiagonal(13, 3, float, 'pbicgstab', verbose=False)
+    # import sys
+    # pytest.main( sys.argv )
+    test_solver_tridiagonal(13, 3, float, None, 'pbicgstab', verbose=False)
