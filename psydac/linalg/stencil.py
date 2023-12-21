@@ -798,6 +798,7 @@ class StencilMatrix( LinearOperator ):
         self._codomain = W
         self._ndim     = len( dims )
         self._backend  = backend
+        self._precompiled = precompiled
         self._is_T     = False
         self._diag_indices = None
         self._requests = None
@@ -1014,7 +1015,7 @@ class StencilMatrix( LinearOperator ):
             assert out.domain == M.codomain
 
         else :
-            out = StencilMatrix(M.codomain, M.domain, pads=self._pads, backend=self._backend)
+            out = StencilMatrix(M.codomain, M.domain, pads=self._pads, backend=self._backend, precompiled=self._precompiled)
 
         # Call low-level '_transpose' function (works on Numpy arrays directly)
         if conjugate:
@@ -1086,7 +1087,7 @@ class StencilMatrix( LinearOperator ):
 
     # ...
     def __mul__( self, a ):
-        w = StencilMatrix( self._domain, self._codomain, self._pads, self._backend )
+        w = StencilMatrix( self._domain, self._codomain, self._pads, backend=self._backend, precompiled=self._precompiled )
         w._data = self._data * a
         w._func = self._func
         w._args = self._args
@@ -1105,7 +1106,7 @@ class StencilMatrix( LinearOperator ):
                 msg = 'Adding two matrices with different backends is ambiguous - defaulting to backend of first addend'
                 warnings.warn(msg, category=RuntimeWarning)
             
-            w = StencilMatrix(self._domain, self._codomain, self._pads, self._backend)
+            w = StencilMatrix(self._domain, self._codomain, self._pads, backend=self._backend, precompiled=self._precompiled)
             w._data = self._data  +  m._data
             w._func = self._func
             w._args = self._args
@@ -1126,7 +1127,7 @@ class StencilMatrix( LinearOperator ):
                 msg = 'Subtracting two matrices with different backends is ambiguous - defaulting to backend of the matrix we subtract from'
                 warnings.warn(msg, category=RuntimeWarning)
 
-            w = StencilMatrix(self._domain, self._codomain, self._pads, self._backend)
+            w = StencilMatrix(self._domain, self._codomain, self._pads, backend=self._backend, precompiled=self._precompiled)
             w._data = self._data  -  m._data
             w._func = self._func
             w._args = self._args
@@ -1146,7 +1147,7 @@ class StencilMatrix( LinearOperator ):
             assert out.domain is self.domain
             assert out.codomain is self.codomain
         else:
-            out = StencilMatrix(self.domain, self.codomain, pads=self.pads)
+            out = StencilMatrix(self.domain, self.codomain, pads=self.pads, backend=self._backend, precompiled=self._precompiled)
             out._func    = self._func
             out._args    = self._args
         np.conjugate(self._data, out=out._data, casting='no')
@@ -1195,7 +1196,7 @@ class StencilMatrix( LinearOperator ):
             assert out.domain == self.domain
             assert out.codomain == self.codomain
         else :
-            out = StencilMatrix( self.domain, self.codomain, self._pads, self._backend )
+            out = StencilMatrix( self.domain, self.codomain, self._pads, backend=self._backend, precompiled=self._precompiled )
         out._data[:] = self._data[:]
         out._func    = self._func
         out._args    = self._args
@@ -1234,7 +1235,7 @@ class StencilMatrix( LinearOperator ):
 
     #...
     def __abs__( self ):
-        w = StencilMatrix( self._domain, self._codomain, self._pads, self._backend )
+        w = StencilMatrix( self._domain, self._codomain, self._pads, backend=self._backend, precompiled=self._precompiled )
         w._data = abs(self._data)
         w._func = self._func
         w._args = self._args
@@ -1710,6 +1711,7 @@ class StencilMatrix( LinearOperator ):
         self._transpose_args  = self._transpose_args_null.copy()
 
         if self._backend is None:
+            print('+++ WARNING: no backend set (probably slow Python loops). This should not happen - contact a developer. +++')
             
             self._func           = self._dot
             self._transpose_func = self._transpose
@@ -1767,6 +1769,7 @@ class StencilMatrix( LinearOperator ):
                 self._transpose_args['p_out'] = np.array(self.domain.pads)
             
         else:
+            print('+++ WARNING: pre-compiled Struphy kernels are not used. Compilation might fail - please contact a developer. +++')
             
             transpose = TransposeOperator(self._ndim, backend=frozenset(backend.items()))
             self._transpose_func = transpose.func
