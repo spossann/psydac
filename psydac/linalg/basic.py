@@ -831,42 +831,51 @@ class PowerLinearOperator(LinearOperator):
 #===============================================================================
 class InverseLinearOperator(LinearOperator):
     """
-    Iterative solver for square linear system Ax=b, where x and b belong to (normed)
+    Abstract base class for the (approximate) inverse A_inv := A^{-1} of a
+    square matrix A. The result of A_inv.dot(b) is the (approximate) solution x
+    of the linear system A x = b, where x and b belong to the same (normed)
     vector space V.
-    
+
+    We assume that the linear system is solved by an iterative method, which
+    needs a first guess `x0` and an exit condition based on `tol` and `maxiter`.
+
+    Concrete subclasses of this class must implement the `dot` method and take
+    care of any internal storage which might be necessary.
+
     Parameters
     ----------
     A : psydac.linalg.basic.LinearOperator
         Left-hand-side matrix A of linear system.
-
+        
     x0 : psydac.linalg.basic.Vector
         First guess of solution for iterative solver (optional).
-
+        
     tol : float
         Absolute tolerance for L2-norm of residual r = A*x - b.
-
+        
     maxiter: int
         Maximum number of iterations.
-
+        
     verbose : bool
         If True, L2-norm of residual r is printed at each iteration.
     """
 
     def __init__(self, A, **kwargs):
-        
+
         assert isinstance(A, LinearOperator)
         assert A.domain.dimension == A.codomain.dimension
         domain = A.codomain
         codomain = A.domain
-        
+
         if kwargs['x0'] is None:
             kwargs['x0'] = codomain.zeros()
-        
+
         self._A = A
         self._domain = domain
         self._codomain = codomain
+
+        self._check_options(**kwargs)
         self._options = kwargs
-        self._check_options(**self._options)
 
     @property
     def domain(self):
@@ -882,6 +891,16 @@ class InverseLinearOperator(LinearOperator):
 
     @property
     def linop(self):
+        """
+        The linear operator L of which this object is the inverse L^{-1}.
+
+        The linear operator L can be modified in place, or replaced entirely
+        through the setter. A substitution should only be made in cases where
+        no other options are viable, as it breaks the one-to-one map between
+        the original linear operator L (passed to the constructor) and the
+        current `InverseLinearOperator` object L^{-1}. Use with extreme care!
+
+        """
         return self._A
     
     @linop.setter
@@ -891,19 +910,9 @@ class InverseLinearOperator(LinearOperator):
         assert a.codomain is self.codomain
         self._A = a
 
-    @property
-    def options(self):
-        return self._options
-    
-    @property
-    @abstractmethod
-    def solver(self):
-        "String that identifies the solver."
-        pass
-    
     def _check_options(self, **kwargs):
         for key, value in kwargs.items():
-            
+
             if key == 'x0':
                 if value is not None:
                     assert isinstance(value, Vector), "x0 must be a Vector or None"
@@ -926,76 +935,39 @@ class InverseLinearOperator(LinearOperator):
     def get_info(self):
         return self._info
 
-    def get_options(self):
-        return self._options.copy()
+    def get_options(self, key=None):
+        """Get a copy of all the solver options, or a specific value of interest.
+
+        Parameters
+        ----------
+        key : str | None
+            Name of the specific option of interest (default: None).
+
+        Returns
+        -------
+        dict | type(self._options['key']) | None
+            If `key` is given, get the specific option of interest. If there is
+            no such option, `None` is returned instead. If `key` is not given,
+            get a copy of all the solver options in a dictionary.
+
+        """
+        if key is None:
+            return self._options.copy()
+        else:
+            return self._options.get(key)
 
     def set_options(self, **kwargs):
+        """Set the solver options by passing keyword arguments.
+        """
         self._check_options(**kwargs)
         self._options.update(kwargs)
 
     def transpose(self, conjugate=False):
-        from psydac.linalg.solvers import inverse
-        
-        At = self.linop.transpose(conjugate=conjugate)
-        solver = self.solver
+        cls     = type(self)
+        At      = self.linop.transpose(conjugate=conjugate)
         options = self._options
-        return inverse(At, solver, **options)
+        return cls(At, **options)
 
-    @staticmethod
-    def jacobi(A, b, out=None):
-        """
-        Jacobi preconditioner.
-
-        A : psydac.linalg.stencil.StencilMatrix | psydac.linalg.block.BlockLinearOperator
-            Left-hand-side matrix A of linear system.
-
-        b : psydac.linalg.stencil.StencilVector | psydac.linalg.block.BlockVector
-            Right-hand-side vector of linear system.
-
-        Returns
-        -------
-        x : psydac.linalg.stencil.StencilVector | psydac.linalg.block.BlockVector
-            Preconditioner solution
-
-        """
-        from psydac.linalg.block   import BlockLinearOperator, BlockVector
-        from psydac.linalg.stencil import StencilMatrix, StencilVector
-
-        # In case A is None we return a zero vector
-        if A is None:
-            return b.space.zeros()
-
-        # Sanity checks
-        assert isinstance(A, (StencilMatrix, BlockLinearOperator))
-        assert isinstance(b, (StencilVector, BlockVector))
-        assert A.codomain.dimension == A.domain.dimension
-        assert A.codomain == b.space
-
-        #-------------------------------------------------------------
-        # Handle the case of a block linear system
-        if isinstance(A, BlockLinearOperator):
-            if out is not None:
-                for i, bi in enumerate(b.blocks):
-                    InverseLinearOperator.jacobi(A[i,i], bi, out=out[i])
-                return out
-            else:
-                x = [InverseLinearOperator.jacobi(A[i, i], bi) for i, bi in enumerate(b.blocks)]
-                y = BlockVector(b.space, blocks=x)
-                return y
-        #-------------------------------------------------------------
-
-        V = b.space
-        i = tuple(slice(s, e + 1) for s, e in zip(V.starts, V.ends))
-
-        if out is not None:
-            b.copy(out=out)
-            out[i] /= A.diagonal()
-            out.update_ghost_regions()
-        else:
-            out = b.copy()
-            out[i] /= A.diagonal()
-            out.update_ghost_regions()
-            return out
 
 #===============================================================================
 class LinearSolver(ABC):
