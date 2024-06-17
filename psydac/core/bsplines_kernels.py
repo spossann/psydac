@@ -3,7 +3,6 @@
 # like Numpy functions.
 
 import numpy as np
-from psydac.core.arrays import matmul, sum_vec, min_vec, max_vec
 
 # =============================================================================
 def find_span_p(knots: 'float[:]', degree: int, x: float):
@@ -35,8 +34,9 @@ def find_span_p(knots: 'float[:]', degree: int, x: float):
     .. [1] L. Piegl and W. Tiller. The NURBS Book, 2nd ed.,
         Springer-Verlag Berlin Heidelberg GmbH, 1997.
     """
-    # Knot index at left/right boundary
+    # last knot on the left boundary
     low  = degree
+    # first knot on the right boundary
     high = len(knots)-1-degree
 
     # Check if point is exactly on left/right boundary, or outside domain
@@ -323,7 +323,7 @@ def basis_funs_all_ders_p(knots: 'float[:]', degree: int, x: float, span: int, n
             j2 = k-1 if (r-1 <= pk) else degree-r
 
             a[s2, j1:j2 + 1] = (a[s1, j1:j2 + 1] - a[s1, j1 - 1:j2]) * ndu[pk + 1, rk + j1:rk + j2 + 1]
-            matmul(a[s2:s2 + 1, j1:j2 + 1], ndu[rk + j1:rk + j2 + 1, pk: pk + 1], temp_d)
+            temp_d[:, :] = np.matmul(a[s2:s2 + 1, j1:j2 + 1], ndu[rk + j1:rk + j2 + 1, pk: pk + 1])
             d+= temp_d[0, 0]
             if r <= pk:
                a[s2, k] = - a[s1, k - 1] * ndu[pk + 1, r]
@@ -384,7 +384,7 @@ def basis_integrals_p(knots: 'float[:]', degree: int, out: 'float[:]'):
 
 # =============================================================================
 def collocation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, normalization: bool, xgrid: 'float[:]',
-                         out: 'float[:,:]'):
+                         out: 'float[:,:]', multiplicity : int = 1):
     """
     Compute the collocation matrix :math:`C_ij = B_j(x_i)`, which contains the
     values of each B-spline basis function :math:`B_j` at all locations :math:`x_i`.
@@ -411,11 +411,16 @@ def collocation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, normali
     out : array
         The result will be inserted into this array.
         It should be of the appropriate shape and dtype.
+        
+    multiplicity : int
+        Multiplicity of the knots in the knot sequence, we assume that the same 
+        multiplicity applies to each interior knot.
+        
     """
     # Number of basis functions (in periodic case remove degree repeated elements)
     nb = len(knots)-degree-1
     if periodic:
-        nb -= degree
+        nb -= degree + 1 - multiplicity
 
     # Number of evaluation points
     nx = len(xgrid)
@@ -446,9 +451,8 @@ def collocation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, normali
                 for j in range(degree + 1):
                     actual_j = (spans[i] - degree + j) % nb
                     out[i, actual_j] = basis[i, j] * scaling[spans[i] - degree + j]
-                    
+
         else:
-            #scaling = 1.0 / integrals
             for i in range(nx):
                 local_scaling = scaling[spans[i] - degree:spans[i] + 1]
                 out[i, spans[i] - degree:spans[i] + 1] = basis[i, :] * local_scaling[:]
@@ -462,7 +466,7 @@ def collocation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, normali
 
 # =============================================================================
 def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, normalization: bool, xgrid: 'float[:]',
-                           check_boundary: bool, elevated_knots: 'float[:]', out: 'float[:,:]'):
+                           check_boundary: bool, elevated_knots: 'float[:]', out: 'float[:,:]', multiplicity : int = 1):
     """Computes the histopolation matrix.
 
     If called with normalization=True, this uses M-splines instead of B-splines.
@@ -490,6 +494,10 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
     out : array
         The result will be inserted into this array.
         It should be of the appropriate shape and dtype.
+        
+    multiplicity : int
+        Multiplicity of the knots in the knot sequence, we assume that the same 
+        multiplicity applies to each interior knot.
 
     Notes
     -----
@@ -499,7 +507,7 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
     """
     nb = len(knots) - degree - 1
     if periodic:
-        nb -= degree
+        nb -= degree + 1 - multiplicity
 
     # Number of evaluation points
     nx = len(xgrid)
@@ -547,7 +555,8 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
                             False,
                             False,
                             xgrid_new[:actual_len],
-                            colloc)
+                            colloc,
+                            multiplicity = multiplicity)
 
     m = colloc.shape[0] - 1
     n = colloc.shape[1] - 1
@@ -575,7 +584,7 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
             jend = min(spans[i + 1], n)
             # Compute non-zero values of histopolation matrix
             for j in range(1 + jstart, jend + 1):
-                s = sum_vec(colloc[i, 0:j]) - sum_vec(colloc[i + 1, 0:j])
+                s = np.sum(colloc[i, 0:j]) - np.sum(colloc[i + 1, 0:j])
                 H[i, j - 1] = s
 
     else:
@@ -587,7 +596,7 @@ def histopolation_matrix_p(knots: 'float[:]', degree: int, periodic: bool, norma
             jend = min(spans[i + 1], n)
             # Compute non-zero values of histopolation matrix
             for j in range(1 + jstart, jend + 1):
-                s = sum_vec(colloc[i, 0:j]) - sum_vec(colloc[i + 1, 0:j])
+                s = np.sum(colloc[i, 0:j]) - np.sum(colloc[i + 1, 0:j])
                 H[i, j - 1] = s * integrals[j - 1]
 
     # Mitigate round-off errors
@@ -689,7 +698,7 @@ def breakpoints_p(knots: 'float[:]', degree: int, out: 'float[:]', tol: float = 
 
 
 # =============================================================================
-def greville_p(knots: 'float[:]', degree: int, periodic: bool, out:'float[:]'):
+def greville_p(knots: 'float[:]', degree: int, periodic: bool, out:'float[:]', multiplicity: int=1):
     """
     Compute coordinates of all Greville points.
 
@@ -707,18 +716,22 @@ def greville_p(knots: 'float[:]', degree: int, periodic: bool, out:'float[:]'):
     out : array
         The result will be inserted into this array.
         It should be of the appropriate shape and dtype.
+        
+    multiplicity : int
+        Multiplicity of the knots in the knot sequence, we assume that the same 
+        multiplicity applies to each interior knot.
     """
     T = knots
     p = degree
-    n = len(T)-2*p-1 if periodic else len(T)-p-1
+    n = len(T)-2*p-2 + multiplicity if periodic else len(T)-p-1
 
     # Compute greville abscissas as average of p consecutive knot values
-    if p == 0:
+    if p == multiplicity-1:
         for i in range(n):
-            out[i] = sum_vec(T[i:i + 2]) / 2
+            out[i] = sum(T[i:i + p + 2]) / (p + 2)
     else:
         for i in range(1, 1+n):
-            out[i - 1] = sum_vec(T[i:i + p]) / p
+            out[i - 1] = sum(T[i:i + p]) / p
 
     # Domain boundaries
     a = T[p]
@@ -788,9 +801,12 @@ def elements_spans_p(knots: 'float[:]', degree: int, out: 'int[:]'):
 def make_knots_p(breaks: 'float[:]', degree: int, periodic: bool, out: 'float[:]', multiplicity: int = 1):
     """
     Create spline knots from breakpoints, with appropriate boundary conditions.
-    Let p be spline degree. If domain is periodic, knot sequence is extended
-    by periodicity so that first p basis functions are identical to last p.
-    Otherwise, knot sequence is clamped (i.e. endpoints are repeated p times).
+    
+    If domain is periodic, knot sequence is extended by periodicity to have a 
+    total of (n_cells-1)*mult+2p+2 knots (all break points are repeated mult 
+    time and we add p+1-mult knots by periodicity at each side).
+    
+    Otherwise, knot sequence is clamped (i.e. endpoints have multiplicity p+1).
 
     Parameters
     ----------
@@ -813,20 +829,23 @@ def make_knots_p(breaks: 'float[:]', degree: int, periodic: bool, out: 'float[:]
         It should be of the appropriate shape and dtype.
     """
     ncells = len(breaks) - 1
-    for i in range(1, ncells):
-        out[degree + 1  + (i - 1) * multiplicity:degree + 1 + i * multiplicity] = breaks[i]
-
-    out[degree] = breaks[0]
-    out[len(out) - degree - 1] = breaks[-1]
+    
+    for i in range(0, ncells+1):
+        out[degree + 1 + (i-1) * multiplicity  :degree + 1 + i * multiplicity ] = breaks[i]
+    
+    len_out = len(out)
 
     if periodic:
         period = breaks[-1]-breaks[0]
 
-        out[:degree] = breaks[ncells - degree:ncells] - period
-        out[len(out) - degree:] = breaks[1:degree + 1] + period
+        out[: degree + 1 - multiplicity] = out[len_out - 2 * (degree + 1 )+ multiplicity: len_out - (degree + 1)] - period
+        out[len_out - (degree + 1 - multiplicity) :] = out[degree + 1:2*(degree + 1)- multiplicity] + period
+        
+
+        #
     else:
-        out[0:degree + 1] = breaks[0]
-        out[len(out) - degree - 1:] = breaks[-1]
+        out[0:degree + 1 - multiplicity] = breaks[0]
+        out[len_out - degree - 1 + multiplicity:] = breaks[-1]
 
 
 # =============================================================================
@@ -866,11 +885,10 @@ def elevate_knots_p(knots: 'float[:]', degree: int, periodic: bool, out: 'float[
         It should be of the appropriate shape and dtype.
     """
     if periodic:
-        T = knots
-        p = degree
+        T, p = knots, degree
         period = T[len(knots) -1 - p] - T[p]
-        left   = T[len(knots) -2 - 2 * p] - period
-        right  = T[2 * p + 1] + period
+        left   = T[len(knots) -2 - 2 * p + multiplicity-1] - period
+        right  = T[2 * p + 2 - multiplicity] + period
 
         out[0] = left
         out[-1] = right
@@ -998,7 +1016,7 @@ def basis_ders_on_quad_grid_p(knots: 'float[:]', degree: int, quad_grid: 'float[
         . id: derivative             (0 <= id <= nders )
         . iq: local quadrature point (0 <= iq <  nq    )
     """
-    ne = quad_grid.shape[0]
+    ne, nq = quad_grid.shape
     if normalization:
         integrals = np.zeros(knots.shape[0] - degree - 1)
         basis_integrals_p(knots, degree, integrals)
@@ -1058,8 +1076,8 @@ def cell_index_p(breaks: 'float[:]', i_grid: 'float[:]', tol: float, out: 'int[:
     nbk = len(breaks)
 
     # Check if there are points outside the domain
-    if min_vec(i_grid) < breaks[0] - tol: return 1
-    if max_vec(i_grid) > breaks[nbk - 1] + tol: return 1
+    if np.min(i_grid) < breaks[0] - tol: return 1
+    if np.max(i_grid) > breaks[nbk - 1] + tol: return 1
 
     current_index = 0
     while current_index < nx:

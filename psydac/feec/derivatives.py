@@ -101,8 +101,8 @@ class DirectionalDerivativeOperator(LinearOperator):
             self._codomain = W
         
         # the local area in the codomain without padding
-        self._idslice = tuple([slice(pad, e-s+1+pad) for pad, s, e
-            in zip(self._codomain.pads, self._codomain.starts, self._codomain.ends)])
+        self._idslice = tuple([slice(pad*m, e-s+1+pad*m) for pad, s, e, m
+            in zip(self._codomain.pads, self._codomain.starts, self._codomain.ends, self._codomain.shifts)])
 
         # prepare the slices (they are of the right size then, we checked this already)
         # identity slice
@@ -112,12 +112,13 @@ class DirectionalDerivativeOperator(LinearOperator):
         diff_pad = self._codomain.pads[self._diffdir]
         diff_s = self._codomain.starts[self._diffdir]
         diff_e = self._codomain.ends[self._diffdir]
+        diff_m = self._codomain.shifts[self._diffdir]
 
         # the diffslice depends on the transposition
         if self._transposed:
-            diff_partslice = slice(diff_pad-1, diff_e-diff_s+1+diff_pad-1)
+            diff_partslice = slice(diff_m*diff_pad-1, diff_e-diff_s+1+diff_pad*diff_m-1)
         else:
-            diff_partslice = slice(diff_pad+1, diff_e-diff_s+1+diff_pad+1)
+            diff_partslice = slice(diff_m*diff_pad+1, diff_e-diff_s+1+diff_m*diff_pad+1)
         
         diffslice = tuple([diff_partslice if i==self._diffdir else idslice[i]
                             for i in range(self._domain.ndim)])
@@ -322,7 +323,7 @@ class DirectionalDerivativeOperator(LinearOperator):
                 if codomain_local == 1 and domain_local == 1 and self.domain.periods[d]:
                     # case of one cell and periodic BC should be treated as a constant, thus zero matrix
                     directional_matrix = spa.coo_array((codomain_local, domain_local))
-                    
+
                 else:
                     maindiag = np.ones(domain_local) * (-sign)
                     adddiag = np.ones(domain_local) * sign
@@ -361,7 +362,6 @@ class DirectionalDerivativeOperator(LinearOperator):
 
 #====================================================================================================
 class DiffOperator:
-    
     def __init__(self, domain, codomain, matrix):
         assert isinstance(domain, FemSpace)
         assert isinstance(codomain, FemSpace)
@@ -455,6 +455,7 @@ class Gradient_2D(DiffOperator):
 
         # Store data in object   
         super().__init__(H1, Hcurl, matrix)
+
 
 #====================================================================================================
 class Gradient_3D(DiffOperator):
@@ -574,10 +575,8 @@ class VectorCurl_2D(DiffOperator):
                   [-DirectionalDerivativeOperator(B_B, M_B, 0)]]
         matrix = BlockLinearOperator(H1.vector_space, Hdiv.vector_space, blocks=blocks)
 
-        # Store data in object
-        self._domain   = H1
-        self._codomain = Hdiv
-        self._matrix   = matrix
+        # Store data in object   
+        super().__init__(H1, Hdiv, matrix)
 
 #====================================================================================================
 class Curl_3D(DiffOperator):
