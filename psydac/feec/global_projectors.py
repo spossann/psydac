@@ -15,6 +15,7 @@ from psydac.ddm.cart import DomainDecomposition, CartDecomposition
 from psydac.fem.tensor import TensorFemSpace
 from psydac.fem.vector import VectorFemSpace
 
+from psydac.utilities.utils import roll_edges
 
 from abc import ABCMeta, abstractmethod
 
@@ -179,6 +180,11 @@ class GlobalProjector(metaclass=ABCMeta):
                     if quad_x[j] is None:
                         u, w = uw[j]
                         global_quad_x, global_quad_w = quadrature_grid(V.histopolation_grid, u, w)
+                        #"roll" back points to the interval to ensure that the quadrature points are
+                        #in the domain. Only usefull in th eperiodic case (else do nothing)
+                        #if not used then you will have quadrature points outside of the domain which 
+                        #might cause problem when your function is only defined inside the domain
+                        roll_edges(V.domain, global_quad_x) 
                         quad_x[j] = global_quad_x[s:e+1]
                         quad_w[j] = global_quad_w[s:e+1]
                     local_x, local_w = quad_x[j], quad_w[j]
